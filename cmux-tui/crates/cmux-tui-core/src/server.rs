@@ -91,6 +91,10 @@ enum Command {
         #[serde(default)]
         name: Option<String>,
         layout: LayoutRequest,
+        #[serde(default)]
+        cols: Option<u16>,
+        #[serde(default)]
+        rows: Option<u16>,
     },
     Send {
         surface: SurfaceId,
@@ -1024,6 +1028,17 @@ fn parse_split_dir(dir: &str) -> anyhow::Result<SplitDir> {
     }
 }
 
+fn optional_surface_size(
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> anyhow::Result<Option<(u16, u16)>> {
+    match (cols, rows) {
+        (Some(cols), Some(rows)) => Ok(Some((cols.max(1), rows.max(1)))),
+        (None, None) => Ok(None),
+        _ => anyhow::bail!("cols and rows must be supplied together"),
+    }
+}
+
 fn parse_direction(dir: &str) -> anyhow::Result<Direction> {
     match dir {
         "left" => Ok(Direction::Left),
@@ -1451,9 +1466,9 @@ fn handle_command(
         Command::ExportLayout { screen } => {
             mux.with_state(|state| export_layout_json(state, screen))
         }
-        Command::ApplyLayout { workspace, name, layout } => {
+        Command::ApplyLayout { workspace, name, layout, cols, rows } => {
             let layout = layout_request_to_spec(layout)?;
-            let applied = mux.apply_layout(workspace, name, &layout)?;
+            let applied = mux.apply_layout(workspace, name, &layout, optional_surface_size(cols, rows)?)?;
             Ok(json!({
                 "screen": applied.screen,
                 "panes": applied.panes.iter().map(|pane| {
@@ -1549,8 +1564,14 @@ fn handle_command(
             if new_workspace && pane.is_some() {
                 anyhow::bail!("pane and new_workspace are mutually exclusive");
             }
-            let placement =
-                mux.run_command_surface(argv, pane, new_workspace, cwd, name, cols.zip(rows))?;
+            let placement = mux.run_command_surface(
+                argv,
+                pane,
+                new_workspace,
+                cwd,
+                name,
+                optional_surface_size(cols, rows)?,
+            )?;
             Ok(json!({
                 "surface": placement.surface,
                 "pane": placement.pane,
@@ -1642,11 +1663,11 @@ fn handle_command(
             }))
         }
         Command::NewTab { pane, cwd, cols, rows } => {
-            let surface = mux.new_tab(pane, cwd, cols.zip(rows))?;
+            let surface = mux.new_tab(pane, cwd, optional_surface_size(cols, rows)?)?;
             Ok(json!({ "surface": surface.id }))
         }
         Command::NewBrowserTab { url, pane, cols, rows } => {
-            let surface = mux.new_browser_tab(url, pane, cols.zip(rows))?;
+            let surface = mux.new_browser_tab(url, pane, optional_surface_size(cols, rows)?)?;
             Ok(json!({ "surface": surface.id }))
         }
         Command::SetCellPixels { width_px, height_px } => {
@@ -1734,16 +1755,16 @@ fn handle_command(
             Ok(json!({}))
         }
         Command::NewWorkspace { name, cols, rows } => {
-            let surface = mux.new_workspace(name, cols.zip(rows))?;
+            let surface = mux.new_workspace(name, optional_surface_size(cols, rows)?)?;
             Ok(json!({ "surface": surface.id }))
         }
         Command::NewScreen { workspace, cols, rows } => {
-            let surface = mux.new_screen(workspace, cols.zip(rows))?;
+            let surface = mux.new_screen(workspace, optional_surface_size(cols, rows)?)?;
             Ok(json!({ "surface": surface.id }))
         }
         Command::Split { pane, dir, cols, rows } => {
             let dir = parse_split_dir(&dir)?;
-            let surface = mux.split(pane, dir, cols.zip(rows))?;
+            let surface = mux.split(pane, dir, optional_surface_size(cols, rows)?)?;
             Ok(json!({ "surface": surface.id }))
         }
         Command::SetRatio { pane, dir, ratio } => {

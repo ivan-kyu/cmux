@@ -175,7 +175,12 @@ impl Session {
     /// the attach replay, so the replay arrives at final geometry).
     pub fn surface_sized(&self, id: SurfaceId, size: Option<(u16, u16)>) -> Option<SurfaceHandle> {
         match self {
-            Session::Local(mux) => mux.surface(id).map(SurfaceHandle::Local),
+            Session::Local(mux) => mux.surface(id).map(|surface| {
+                if let Some((cols, rows)) = size {
+                    let _ = mux.resize_surface(id, cols, rows);
+                }
+                SurfaceHandle::Local(surface)
+            }),
             Session::Remote(remote) => {
                 if remote.surface_kind(id) == SurfaceKind::Browser {
                     if remote.supports_browser_attach() {
